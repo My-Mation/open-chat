@@ -1,10 +1,9 @@
-
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
+
 'use client'
 
 import { useEffect, useState } from 'react'
-import { useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import MessageBubble from '@/components/MessageBubble'
 import ChatInput from '@/components/ChatInput'
@@ -17,36 +16,40 @@ type Message = {
   created_at: string
 }
 
-export default function ChatPage() {
-  const searchParams = useSearchParams()
-  const currentUser = searchParams.get('user') || 'anonymous'
-  const room = searchParams.get('room') || 'default'
+export default function ChatPage({
+  searchParams,
+}: {
+  searchParams: { user?: string; room?: string }
+}) {
+  const currentUser = searchParams.user || 'anonymous'
+  const room = searchParams.room || 'default'
+
   const [messages, setMessages] = useState<Message[]>([])
 
-  // 🔹 1. Fetch existing messages
   useEffect(() => {
+    if (!supabase) return
+
     async function fetchMessages() {
-      const { data, error } = await supabase
+      const { data } = await supabase
         .from('messages')
         .select('*')
         .eq('room_id', room)
         .order('created_at', { ascending: true })
 
-      if (!error) setMessages(data || [])
+      setMessages(data || [])
     }
 
     fetchMessages()
 
-    // 🔹 2. Realtime subscription
     const channel = supabase
-      .channel('realtime-messages')
+      .channel(`room-${room}`)
       .on(
         'postgres_changes',
         {
           event: 'INSERT',
           schema: 'public',
           table: 'messages',
-          filter: 'room_id=eq.${room}',
+          filter: `room_id=eq.${room}`,
         },
         (payload: any) => {
           setMessages((prev) => [...prev, payload.new])
@@ -57,11 +60,10 @@ export default function ChatPage() {
     return () => {
       supabase.removeChannel(channel)
     }
-  }, [])
+  }, [room])
 
-  // 🔹 3. Send message handler
   async function handleSend(content: string) {
-    if (!content.trim()) return
+    if (!content.trim() || !supabase) return
 
     await supabase.from('messages').insert([
       {
@@ -74,8 +76,6 @@ export default function ChatPage() {
 
   return (
     <div className="min-h-screen bg-gray-950 text-gray-100 flex flex-col">
-
-      {/* Header */}
       <div className="px-6 py-4 border-b border-gray-800">
         <h1 className="text-lg font-semibold tracking-tight">
           Realtime Chat
@@ -85,7 +85,6 @@ export default function ChatPage() {
         </p>
       </div>
 
-      {/* Messages Area */}
       <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
         {messages.map((msg) => (
           <MessageBubble
@@ -97,11 +96,9 @@ export default function ChatPage() {
         ))}
       </div>
 
-      {/* Input Area */}
       <div className="border-t border-gray-800 p-4">
         <ChatInput onSend={handleSend} />
       </div>
-
     </div>
   )
 }
